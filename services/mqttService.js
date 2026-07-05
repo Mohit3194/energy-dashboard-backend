@@ -3,6 +3,8 @@
 require("dotenv").config();
 
 const mqtt = require("mqtt");
+const { Point } = require("@influxdata/influxdb-client");
+const { writeApi } = require("./influxClient");
 
 // ADD THIS LINE
 const latestMeterData = require("../dataStore");
@@ -37,28 +39,37 @@ client.on("connect", () => {
 
 });
 
-client.on("message", (topic, message) => {
-
+client.on("message", async (topic, message) => {
   try {
-
     console.log("RAW MQTT:", message.toString());
 
     const data = JSON.parse(message.toString());
 
     console.log("PARSED:", data);
 
-    // STORE DATA
-
+    // Store latest values for dashboard
     latestMeterData[data.MeterId] = data;
 
     console.log("STORE:", latestMeterData);
 
+    // Write to InfluxDB
+    const point = new Point("energy_meter")
+      .tag("meter_id", String(data.MeterId))
+      .floatField("energy", Number(data.Energy))
+      .floatField("power", Number(data.Power))
+      .floatField("peakPower", Number(data.PeakPower))
+      .floatField("voltage", Number(data.Voltage))
+      .floatField("current", Number(data.Current))
+      .floatField("frequency", Number(data.Frequency))
+      .timestamp(new Date(data.Timestamp));
+
+    writeApi.writePoint(point);
+    await writeApi.flush();
+
+    console.log(`InfluxDB write successful for Meter ${data.MeterId}`);
   } catch (err) {
-
-    console.log("MQTT Parse Error:", err);
-
+    console.error("MQTT / Influx Error:", err);
   }
-
 });
 
 module.exports = client;

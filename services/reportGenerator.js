@@ -16,7 +16,7 @@ const METER_ALIASES = {
 */
 const MEASUREMENT = "energy_meter"; // measurement name your writes use
 const TAG_METER_ID = "meter_id";       // tag key identifying which meter
-const FIELD_ENERGY = "kwh";           // field: energy consumed
+const FIELD_ENERGY = "energy";           // field: energy consumed
 const FIELD_POWER = "power";          // field: instantaneous power (used for avg + peak)
 const FIELD_COST = null;              // set to a field name (e.g. "cost") IF you store cost directly
 
