@@ -24,7 +24,10 @@ function getTransporter() {
   }
 
   transporter = nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    family: 4, // force IPv4 — some hosts (e.g. Render) can't route Gmail's IPv6 address
     auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
   });
   return transporter;
