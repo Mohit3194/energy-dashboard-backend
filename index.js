@@ -27,6 +27,8 @@ app.get("/api/meters", (req, res) => {
 
 // Register routes BEFORE app.listen()
 app.use("/api", reportsRouter);
+const reportsCronRouter = require("./routes/reportsCron");
+app.use("/api", reportsCronRouter);
 
 // Start cron
 startScheduledReportsCron();

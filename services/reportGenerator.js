@@ -15,9 +15,9 @@ const METER_ALIASES = {
   Whatever your meter-polling job already writes with, point these at it.
 */
 const MEASUREMENT = "energy_meter"; // measurement name your writes use
-const TAG_METER_ID = "meter_id";       // tag key identifying which meter
-const FIELD_ENERGY = "energy";           // field: energy consumed
-const FIELD_POWER = "power";          // field: instantaneous power (used for avg + peak)
+const TAG_METER_ID = "MeterId";       // tag key identifying which meter
+const FIELD_ENERGY = "Energy";           // field: energy consumed
+const FIELD_POWER = "Power";          // field: instantaneous power (used for avg + peak)
 const FIELD_COST = null;              // set to a field name (e.g. "cost") IF you store cost directly
 
 // Used only if FIELD_COST is null — cost is computed from energy instead.
