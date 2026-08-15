@@ -25,10 +25,14 @@ function getTransporter() {
 
   transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
+    port: 587,
+    secure: false, // STARTTLS on 587, instead of implicit TLS on 465
+    requireTLS: true,
     family: 4, // force IPv4 — some hosts (e.g. Render) can't route Gmail's IPv6 address
     auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
   });
   return transporter;
 }
