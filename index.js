@@ -119,7 +119,7 @@ app.get("/api/energy-test", async (req, res) => {
   }
 });
 
-// Report test 
+// Report test Diagnostics (Remove)
 app.get("/api/report-test", async (req, res) => {
   try {
     const { queryApi, bucket } = require("./services/influxClient");
@@ -172,6 +172,60 @@ app.get("/api/report-test", async (req, res) => {
   }
 });
 /////
+
+//Report Test diagnostics -2 (Remove)
+app.get("/api/aggregate-test", async (req, res) => {
+  try {
+    const { queryApi, bucket } = require("./services/influxClient");
+
+    const flux = `
+      from(bucket: "${bucket}")
+        |> range(
+          start: time(v: "2026-09-12T00:00:00Z"),
+          stop: time(v: "2026-09-13T23:59:59Z")
+        )
+        |> filter(fn: (r) =>
+          r._measurement == "energy_meter" and
+          r._field == "energy" and
+          r.meter_id == "1"
+        )
+        |> group(columns: ["meter_id"])
+        |> sum()
+    `;
+
+    console.log("========== AGGREGATE TEST ==========");
+    console.log(flux);
+
+    const rows = [];
+
+    for await (const { values, tableMeta } of queryApi.iterateRows(flux)) {
+      const row = tableMeta.toObject(values);
+
+      console.log("AGGREGATE ROW:", row);
+
+      rows.push({
+        meter_id: row.meter_id,
+        field: row._field,
+        value: row._value
+      });
+    }
+
+    res.json({
+      success: true,
+      bucket,
+      count: rows.length,
+      rows
+    });
+
+  } catch (error) {
+    console.error("AGGREGATE TEST ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 // Register routes BEFORE app.listen()
 app.use("/api", reportsRouter);
