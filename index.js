@@ -38,3 +38,52 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+//added extra
+app.get("/api/influx-test", async (req, res) => {
+  try {
+    const { queryApi, bucket } = require("./services/influxClient");
+
+    const flux = `
+      from(bucket: "${bucket}")
+        |> range(start: -1d)
+        |> filter(fn: (r) => r._measurement == "energy_meter")
+        |> limit(n: 10)
+    `;
+
+    console.log("========================================");
+    console.log("INFLUX TEST");
+    console.log(flux);
+    console.log("========================================");
+
+    const rows = [];
+
+    for await (const { values, tableMeta } of queryApi.iterateRows(flux)) {
+      const row = tableMeta.toObject(values);
+
+      console.log("TEST ROW:", row);
+
+      rows.push({
+        time: row._time,
+        measurement: row._measurement,
+        field: row._field,
+        value: row._value,
+        meter_id: row.meter_id,
+      });
+    }
+
+    res.json({
+      success: true,
+      bucket,
+      count: rows.length,
+      rows,
+    });
+
+  } catch (error) {
+    console.error("INFLUX TEST ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
