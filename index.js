@@ -76,6 +76,48 @@ app.get("/api/influx-test", async (req, res) => {
   }
 });
 
+//Temporary 
+app.get("/api/energy-test", async (req, res) => {
+  try {
+    const { queryApi, bucket } = require("./services/influxClient");
+
+    const flux = `
+      from(bucket: "${bucket}")
+        |> range(start: -24h)
+        |> filter(fn: (r) =>
+          r._measurement == "energy_meter" and
+          r._field == "energy" and
+          r.meter_id == "1"
+        )
+    `;
+
+    const rows = [];
+
+    for await (const { values, tableMeta } of queryApi.iterateRows(flux)) {
+      const row = tableMeta.toObject(values);
+
+      rows.push({
+        time: row._time,
+        meter_id: row.meter_id,
+        value: row._value
+      });
+    }
+
+    res.json({
+      success: true,
+      count: rows.length,
+      rows: rows.slice(0, 20)
+    });
+
+  } catch (error) {
+    console.error("ENERGY TEST ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 // Register routes BEFORE app.listen()
 app.use("/api", reportsRouter);
