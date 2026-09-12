@@ -10,27 +10,126 @@ const METER_ALIASES = {
   5: "Backup",
 };
 
-// ======================================================
-// INFLUXDB SCHEMA
-// ======================================================
-
 const MEASUREMENT = "energy_meter";
-
-const TAG_METER_ID = "meterid";
+const TAG_METER_ID = "meter_id";
 
 const FIELD_ENERGY = "energy";
 const FIELD_POWER = "power";
 const FIELD_PEAK_POWER = "peakPower";
 
-const FIELD_COST = null;
-
-// Cost per kWh if cost is not stored in InfluxDB
 const COST_PER_KWH = 8;
 
 
-// ======================================================
-// RUN AGGREGATE
-// ======================================================
+/* =========================================================
+   GET FIRST + LAST CUMULATIVE ENERGY
+========================================================= */
+
+async function getEnergyConsumption({
+  from,
+  to,
+  meters,
+}) {
+  const result = {};
+
+  for (const meter of meters) {
+    const meterId = String(meter).trim();
+
+    const flux = `
+      from(bucket: "${bucket}")
+        |> range(
+          start: time(v: "${from}T00:00:00Z"),
+          stop: time(v: "${to}T23:59:59Z")
+        )
+        |> filter(fn: (r) =>
+          r._measurement == "${MEASUREMENT}" and
+          r._field == "${FIELD_ENERGY}" and
+          r.meter_id == "${meterId}"
+        )
+        |> sort(columns: ["_time"])
+    `;
+
+    console.log("\n========================================");
+    console.log("ENERGY CONSUMPTION QUERY");
+    console.log("Meter:", meterId);
+    console.log(flux);
+    console.log("========================================");
+
+    let firstEnergy = null;
+    let lastEnergy = null;
+    let firstTime = null;
+    let lastTime = null;
+
+    try {
+      for await (const { values, tableMeta } of queryApi.iterateRows(flux)) {
+        const row = tableMeta.toObject(values);
+
+        const energy = Number(row._value);
+
+        if (!Number.isFinite(energy)) {
+          continue;
+        }
+
+        if (firstEnergy === null) {
+          firstEnergy = energy;
+          firstTime = row._time;
+        }
+
+        lastEnergy = energy;
+        lastTime = row._time;
+      }
+    } catch (error) {
+      console.error(
+        `Energy query failed for meter ${meterId}:`,
+        error
+      );
+
+      throw error;
+    }
+
+    let consumption = 0;
+
+    if (
+      firstEnergy !== null &&
+      lastEnergy !== null
+    ) {
+      consumption = lastEnergy - firstEnergy;
+    }
+
+    /*
+      Handle meter reset / rollover.
+      If last reading is lower than first reading,
+      we don't report a negative consumption.
+    */
+    if (consumption < 0) {
+      console.warn(
+        `Energy reset detected for meter ${meterId}.`,
+        {
+          firstEnergy,
+          lastEnergy,
+        }
+      );
+
+      consumption = 0;
+    }
+
+    result[meterId] = {
+      firstEnergy,
+      lastEnergy,
+      firstTime,
+      lastTime,
+      consumption,
+    };
+
+    console.log("ENERGY RESULT:", result[meterId]);
+  }
+
+  return result;
+}
+
+
+/* =========================================================
+   RUN POWER AGGREGATE
+========================================================= */
 
 async function runAggregate({
   field,
@@ -51,7 +150,7 @@ async function runAggregate({
           stop: time(v: "${to}T23:59:59Z")
         )
         |> filter(fn: (r) =>
-          r._measurement == "energy_meter" and
+          r._measurement == "${MEASUREMENT}" and
           r._field == "${field}" and
           r.meter_id == "${meterId}"
         )
@@ -59,19 +158,18 @@ async function runAggregate({
         |> ${aggFn}()
     `;
 
-    console.log("\n================================");
-    console.log("REPORT QUERY");
+    console.log("\n----------------------------------------");
+    console.log("POWER QUERY");
     console.log("Meter:", meterId);
     console.log("Field:", field);
     console.log("Aggregate:", aggFn);
-    console.log(flux);
-    console.log("================================\n");
+    console.log("----------------------------------------");
 
     try {
       for await (const { values, tableMeta } of queryApi.iterateRows(flux)) {
         const row = tableMeta.toObject(values);
 
-        console.log("RESULT ROW:", row);
+        console.log("POWER RESULT ROW:", row);
 
         result[meterId] = Number(row._value) || 0;
       }
@@ -84,77 +182,75 @@ async function runAggregate({
       throw error;
     }
 
-    // If no result came back, explicitly keep zero.
     if (result[meterId] === undefined) {
       result[meterId] = 0;
     }
   }
 
-  console.log(
-    `FINAL ${field} ${aggFn} RESULT:`,
-    result
-  );
-
   return result;
 }
 
 
-// ======================================================
-// BUILD REPORT ROWS
-// ======================================================
+/* =========================================================
+   BUILD REPORT
+========================================================= */
 
 async function buildReportRows({
   from,
   to,
   meters,
 }) {
-  const meterKeys = meters
-    .map((m) => String(m).trim())
-    .filter(Boolean);
-
   console.log("\n========================================");
   console.log("BUILD REPORT");
   console.log("FROM:", from);
   console.log("TO:", to);
-  console.log("METERS:", meterKeys);
+  console.log("METERS:", meters);
   console.log("BUCKET:", bucket);
   console.log("========================================");
 
-  const [
-    kwhByMeter,
-    avgPowerByMeter,
-    peakPowerByMeter,
-    costByMeter,
-  ] = await Promise.all([
-    runAggregate({
-      field: "energy",
-      aggFn: "sum",
-      from,
-      to,
-      meters: meterKeys,
-    }),
+  const meterKeys = meters
+    .map((m) => String(m).trim())
+    .filter(Boolean);
 
-    runAggregate({
-      field: "power",
-      aggFn: "mean",
-      from,
-      to,
-      meters: meterKeys,
-    }),
+  /*
+    IMPORTANT:
 
-    runAggregate({
-      field: "peakPower",
-      aggFn: "max",
-      from,
-      to,
-      meters: meterKeys,
-    }),
+    Energy is cumulative.
+    Therefore we DO NOT use sum(energy).
 
-    Promise.resolve(null),
-  ]);
+    We calculate:
+
+    Last Energy - First Energy
+  */
+
+  const energyByMeter = await getEnergyConsumption({
+    from,
+    to,
+    meters: meterKeys,
+  });
+
+  const avgPowerByMeter = await runAggregate({
+    field: FIELD_POWER,
+    aggFn: "mean",
+    from,
+    to,
+    meters: meterKeys,
+  });
+
+  const peakPowerByMeter = await runAggregate({
+    field: FIELD_PEAK_POWER,
+    aggFn: "max",
+    from,
+    to,
+    meters: meterKeys,
+  });
 
   const rows = meterKeys.map((id) => {
-    const kwh = Number(kwhByMeter[id] || 0);
+    const energyData = energyByMeter[id] || {};
+
+    const kwh = Number(
+      energyData.consumption || 0
+    );
 
     const avgPower = Number(
       avgPowerByMeter[id] || 0
@@ -168,215 +264,40 @@ async function buildReportRows({
 
     return {
       id: Number(id),
-      name: METER_ALIASES[id] || `Meter ${id}`,
-      kwh,
-      avgPower,
-      peakPower,
-      cost,
+
+      name:
+        METER_ALIASES[id] ||
+        `Meter ${id}`,
+
+      kwh: Number(kwh.toFixed(2)),
+
+      avgPower: Number(
+        avgPower.toFixed(2)
+      ),
+
+      peakPower: Number(
+        peakPower.toFixed(2)
+      ),
+
+      cost: Number(
+        cost.toFixed(2)
+      ),
     };
   });
 
-  console.log("\nFINAL REPORT:");
+  console.log("\n========================================");
+  console.log("FINAL REPORT");
   console.log(JSON.stringify(rows, null, 2));
+  console.log("========================================");
 
   return rows;
 }
 
-// ======================================================
-// PDF
-// ======================================================
 
-function buildPdfBuffer(rows, { from, to }) {
-  return new Promise((resolve, reject) => {
-
-    const doc = new PDFDocument({
-      margin: 40,
-    });
-
-    const chunks = [];
-
-    doc.on("data", (chunk) => {
-      chunks.push(chunk);
-    });
-
-    doc.on("end", () => {
-      resolve(Buffer.concat(chunks));
-    });
-
-    doc.on("error", reject);
-
-
-    doc
-      .fontSize(18)
-      .text("Energy Report", {
-        align: "left",
-      });
-
-    doc
-      .fontSize(10)
-      .fillColor("#666")
-      .text(`${from} to ${to}`);
-
-    doc.moveDown(1.5);
-
-
-    const totals = rows.reduce(
-      (acc, r) => ({
-        kwh: acc.kwh + Number(r.kwh || 0),
-        cost: acc.cost + Number(r.cost || 0),
-      }),
-      {
-        kwh: 0,
-        cost: 0,
-      }
-    );
-
-
-    doc
-      .fontSize(12)
-      .fillColor("#000")
-      .text(
-        `Total consumption: ${totals.kwh.toFixed(2)} kWh`
-      );
-
-    doc.text(
-      `Total cost: ₹${totals.cost.toFixed(2)}`
-    );
-
-    doc.moveDown(1);
-
-
-    const colX = [
-      40,
-      180,
-      280,
-      380,
-      480,
-    ];
-
-    const headers = [
-      "Meter",
-      "kWh",
-      "Avg Power",
-      "Peak Power",
-      "Cost",
-    ];
-
-
-    doc
-      .fontSize(10)
-      .fillColor("#333");
-
-
-    headers.forEach((h, i) => {
-      doc.text(
-        h,
-        colX[i],
-        doc.y
-      );
-    });
-
-
-    doc.moveDown(0.5);
-
-
-    rows.forEach((r) => {
-
-      const y = doc.y;
-
-      doc.text(
-        r.name,
-        colX[0],
-        y
-      );
-
-      doc.text(
-        Number(r.kwh).toFixed(2),
-        colX[1],
-        y
-      );
-
-      doc.text(
-        Number(r.avgPower).toFixed(2),
-        colX[2],
-        y
-      );
-
-      doc.text(
-        Number(r.peakPower).toFixed(2),
-        colX[3],
-        y
-      );
-
-      doc.text(
-        `₹${Number(r.cost).toFixed(2)}`,
-        colX[4],
-        y
-      );
-
-      doc.moveDown(0.6);
-    });
-
-
-    doc.end();
-  });
-}
-
-
-// ======================================================
-// EXCEL
-// ======================================================
-
-function buildExcelBuffer(rows) {
-
-  const sheetData = rows.map((r) => ({
-    Meter: r.name,
-
-    kWh: Number(
-      Number(r.kwh || 0).toFixed(2)
-    ),
-
-    "Avg Power (kW)": Number(
-      Number(r.avgPower || 0).toFixed(2)
-    ),
-
-    "Peak Power (kW)": Number(
-      Number(r.peakPower || 0).toFixed(2)
-    ),
-
-    "Cost (₹)": Number(
-      Number(r.cost || 0).toFixed(2)
-    ),
-  }));
-
-
-  const ws =
-    XLSX.utils.json_to_sheet(sheetData);
-
-  const wb =
-    XLSX.utils.book_new();
-
-
-  XLSX.utils.book_append_sheet(
-    wb,
-    ws,
-    "Report"
-  );
-
-
-  return XLSX.write(wb, {
-    type: "buffer",
-    bookType: "xlsx",
-  });
-}
-
-
-// ======================================================
-// EXPORT
-// ======================================================
+/* =========================================================
+   EXPORTS
+========================================================= */
 
 module.exports = {
   buildReportRows,
-  buildPdfBuffer,
-  buildExcelBuffer,
 };
