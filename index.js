@@ -119,6 +119,60 @@ app.get("/api/energy-test", async (req, res) => {
   }
 });
 
+// Report test 
+app.get("/api/report-test", async (req, res) => {
+  try {
+    const { queryApi, bucket } = require("./services/influxClient");
+
+    const flux = `
+      from(bucket: "${bucket}")
+        |> range(start: -24h)
+        |> filter(fn: (r) =>
+          r._measurement == "energy_meter" and
+          r._field == "energy" and
+          r.meter_id == "1"
+        )
+    `;
+
+    console.log("========== REPORT TEST ==========");
+    console.log(flux);
+
+    const rows = [];
+
+    for await (const { values, tableMeta } of queryApi.iterateRows(flux)) {
+      const row = tableMeta.toObject(values);
+
+      console.log("REPORT TEST ROW:", row);
+
+      rows.push({
+        time: row._time,
+        measurement: row._measurement,
+        field: row._field,
+        meter_id: row.meter_id,
+        value: row._value
+      });
+    }
+
+    console.log("REPORT TEST COUNT:", rows.length);
+
+    res.json({
+      success: true,
+      bucket,
+      count: rows.length,
+      rows: rows.slice(0, 30)
+    });
+
+  } catch (error) {
+    console.error("REPORT TEST ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+/////
+
 // Register routes BEFORE app.listen()
 app.use("/api", reportsRouter);
 const reportsCronRouter = require("./routes/reportsCron");
