@@ -15,10 +15,38 @@ router.get("/reports", async (req, res) => {
       return res.status(400).json({ error: "from, to, and meters are required query params" });
     }
 
-    const meterIds = meters.split(",").map(Number);
-    const rows = await buildReportRows({ from, to, meters: meterIds });
+    //const meterIds = meters.split(",").map(Number);
+    //const rows = await buildReportRows({ from, to, meters: meterIds });
 
-    res.json({ series: rows.map((r) => ({ meterId: r.id, ...r })) });
+    //res.json({ series: rows.map((r) => ({ meterId: r.id, ...r })) });
+const meterIds = meters
+  .split(",")
+  .map((m) => Number(m.trim()))
+  .filter((m) => !Number.isNaN(m));
+
+console.log("========== REPORT REQUEST ==========");
+console.log("from:", from);
+console.log("to:", to);
+console.log("meters:", meterIds);
+console.log("====================================");
+
+const rows = await buildReportRows({
+  from,
+  to,
+  meters: meterIds,
+});
+
+console.log("========== REPORT ROWS ==========");
+console.log(JSON.stringify(rows, null, 2));
+console.log("=================================");
+
+res.json({
+  series: rows.map((r) => ({
+    meterId: r.id,
+    ...r,
+  })),
+});
+
   } catch (err) {
     console.error("GET /api/reports failed:", err);
     res.status(500).json({ error: "Failed to build report" });
