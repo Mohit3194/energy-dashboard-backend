@@ -25,42 +25,28 @@ app.get("/api/meters", (req, res) => {
   res.json(latestMeterData);
 });
 
-// Register routes BEFORE app.listen()
-app.use("/api", reportsRouter);
-const reportsCronRouter = require("./routes/reportsCron");
-app.use("/api", reportsCronRouter);
-
-// Start cron
-startScheduledReportsCron();
-
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-//added extra
+//Influx Test 
 app.get("/api/influx-test", async (req, res) => {
   try {
     const { queryApi, bucket } = require("./services/influxClient");
 
     const flux = `
       from(bucket: "${bucket}")
-        |> range(start: -1d)
+        |> range(start: -24h)
         |> filter(fn: (r) => r._measurement == "energy_meter")
-        |> limit(n: 10)
+        |> limit(n: 20)
     `;
 
-    console.log("========================================");
-    console.log("INFLUX TEST");
+    console.log("========== INFLUX TEST ==========");
+    console.log("Bucket:", bucket);
     console.log(flux);
-    console.log("========================================");
 
     const rows = [];
 
     for await (const { values, tableMeta } of queryApi.iterateRows(flux)) {
       const row = tableMeta.toObject(values);
 
-      console.log("TEST ROW:", row);
+      console.log("INFLUX ROW:", row);
 
       rows.push({
         time: row._time,
@@ -70,6 +56,8 @@ app.get("/api/influx-test", async (req, res) => {
         meter_id: row.meter_id,
       });
     }
+
+    console.log("TOTAL ROWS:", rows.length);
 
     res.json({
       success: true,
@@ -86,4 +74,19 @@ app.get("/api/influx-test", async (req, res) => {
       error: error.message,
     });
   }
+});
+
+
+// Register routes BEFORE app.listen()
+app.use("/api", reportsRouter);
+const reportsCronRouter = require("./routes/reportsCron");
+app.use("/api", reportsCronRouter);
+
+// Start cron
+startScheduledReportsCron();
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
