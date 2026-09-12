@@ -25,7 +25,7 @@ app.get("/api/meters", (req, res) => {
   res.json(latestMeterData);
 });
 
-//Influx Test 
+//// InfluxDB Diagnostic Test
 app.get("/api/influx-test", async (req, res) => {
   try {
     const { queryApi, bucket } = require("./services/influxClient");
